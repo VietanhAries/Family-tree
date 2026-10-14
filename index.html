@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gia phả</title>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600&display=swap" rel="stylesheet">
+
+<!--
+  CÁCH DÙNG: để gia-pha.html và xlsx.full.min.js chung một thư mục (đừng sửa file xlsx.full.min.js).
+
+  CÁCH TÙY CHỈNH NHANH:
+    - Đổi kích thước thẻ, màu theo đời, tên cột Excel ......... mục 1 (CONFIG) trong <script>
+    - Đổi màu giao diện (nền, chữ, đường nối) ................. mục CSS ngay bên dưới
+    - Đổi nội dung hiển thị trên mỗi thẻ ...................... hàm drawCards() ở mục 4
+-->
+
+<style>
+/* ===== MÀU GIAO DIỆN (có bản sáng và bản tối tự đổi theo hệ thống) ===== */
+:root{
+  --bg:#eef1ee;        /* nền trang */
+  --panel:#fff;        /* nền thẻ và thanh công cụ */
+  --ink:#1f2a2e;       /* chữ chính */
+  --mute:#66757a;      /* chữ phụ (năm sinh, mã) */
+  --line:#8fa0a4;      /* đường nối gia đình */
+  --band:#e4e9e5;      /* dải nền xen kẽ giữa các đời */
+  --border:#cfd8d3;    /* viền thanh công cụ, nút */
+  --accent:#1f5f66;    /* màu nút chính */
+  --hit:#d9822b;       /* viền thẻ tìm thấy */
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#161d1f;--panel:#222c2f;--ink:#e6ecea;--mute:#93a3a7;--line:#5d7075;--band:#1c2527;--border:#34444a}
+}
+
+/* ===== BỐ CỤC CHUNG ===== */
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 "Be Vietnam Pro",system-ui,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--border)}
+h1{font-size:17px;margin:0 8px 0 0}
+button,input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 11px}
+button{cursor:pointer}
+button.main{background:var(--accent);border-color:var(--accent);color:#fff}
+input[type=search]{width:190px}
+.spacer{flex:1}
+#status{color:var(--mute);font-size:13px}
+#warn{display:none;background:#fff4d6;color:#8a5a00;padding:8px 16px;font-size:13px;max-height:90px;overflow:auto}
+#stage{flex:1;overflow:auto}
+#stage.drag{outline:3px dashed var(--accent);outline-offset:-8px}
+#empty{max-width:520px;margin:12vh auto;padding:0 20px;text-align:center;color:var(--mute)}
+#empty h2{color:var(--ink);font-size:18px}
+
+/* ===== THẺ VÀ ĐƯỜNG NỐI ===== */
+svg{display:block}
+.card{cursor:pointer}
+.card .box{fill:var(--panel);stroke-width:1.5}
+.card .name{font-weight:600;font-size:13px;fill:var(--ink)}
+.card .year{font-size:12px;fill:var(--mute)}
+.card .code{font-size:10.5px;fill:var(--mute)}
+.edge{fill:none;stroke:var(--line);stroke-width:1.6}
+.gen-label{font-size:12px;font-weight:600;fill:var(--mute)}
+.dim{opacity:.22}                      /* phần bị làm mờ khi chọn một người */
+.sel .box{stroke-width:3}              /* thẻ đang chọn */
+.hit .box{stroke:var(--hit)!important;stroke-width:3}   /* thẻ tìm thấy */
+
+/* ===== KHUNG THÔNG TIN KHI BẤM VÀO MỘT NGƯỜI ===== */
+#info{position:fixed;right:16px;bottom:16px;width:min(310px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;box-shadow:0 4px 18px rgba(0,0,0,.2);z-index:5}
+#info[hidden]{display:none}
+#info h2{margin:0 30px 2px 0;font-size:16px}
+#info .age{margin:0 0 10px;color:var(--mute)}
+#info dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13px}
+#info dt{color:var(--mute)}
+#info dd{margin:0}
+#info .none{color:var(--mute)}
+#infoClose{position:absolute;top:8px;right:8px;padding:0 9px;line-height:26px}
+</style>
+</head>
+
+<body>
+<header>
+  <h1>Gia phả</h1>
+  <button class="main" id="btnOpen">Mở file Excel</button>
+  <button id="btnRemember" hidden></button>
+  <button id="btnReload" hidden>Tải lại</button>
+  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
+  <input type="search" id="search" placeholder="Tìm tên hoặc mã" aria-label="Tìm thành viên">
+  <button id="btnZoomOut" aria-label="Thu nhỏ">−</button>
+  <button id="btnZoomIn" aria-label="Phóng to">+</button>
+  <button id="btnFit">Vừa khung</button>
+  <span class="spacer"></span>
+  <span id="status">Chưa có dữ liệu</span>
+</header>
+<div id="warn"></div>
+<div id="stage">
+  <div id="empty">
+    <h2>Chọn file Excel để vẽ gia phả</h2>
+    <p>Kéo thả file vào đây hoặc bấm “Mở file Excel”.</p>
+    <p id="emptyHint">Trên Chrome/Edge, trang tự cập nhật mỗi khi bạn lưu file Excel.</p>
+  </div>
+</div>
+
+<aside id="info" hidden>
+  <button id="infoClose" aria-label="Đóng">×</button>
+  <h2 id="infoName"></h2>
+  <p class="age" id="infoAge"></p>
+  <dl id="infoRows"></dl>
+</aside>
+
+<script src="xlsx.full.min.js"></script>
+<script>
+/* =====================================================================
+   1. CẤU HÌNH - phần dễ sửa nhất
+   ===================================================================== */
+const CONFIG = {
+  // Kích thước thẻ và khoảng cách (đơn vị: điểm ảnh)
+  card: {
+    w: 176,          // chiều rộng thẻ
+    h: 80,           // chiều cao thẻ
+    gapSpouse: 14,   // khoảng cách giữa hai vợ chồng
+    gapUnit: 40,     // khoảng cách giữa các gia đình cạnh nhau
+    rowGap: 130,     // khoảng cách dọc giữa các đời (tính từ đầu thẻ này tới đầu thẻ kia)
+    marginX: 70,     // lề trái
+    marginY: 50      // lề trên
+  },
+
+  // Màu theo từng đời (số = góc màu trên vòng màu 0-360). Hết danh sách thì quay lại từ đầu.
+  hues: [190, 150, 95, 45, 20, 340, 290, 250],
+
+  // --- Chạy trực tuyến bằng Google Sheets ---
+  // Dán link "Xuất bản lên web" dạng CSV của Google Sheets vào đây. Để trống nếu dùng file Excel trên máy.
+  // Ví dụ: 'https://docs.google.com/spreadsheets/d/e/2PACX-xxxx/pub?output=csv'
+  sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?output=csv',
+  sheetRefreshSec: 60,      // bao lâu tự tải lại dữ liệu từ Google Sheets (giây)
+  allowLocalFile: false,    // true = vẫn hiện nút "Mở file Excel" khi đã có sheetUrl (dành cho người quản lý)
+
+  generationLabel: 'Đời',   // chữ ghi bên trái mỗi hàng: "Đời 1", "Đời 2"...
+  siblingOrder: 'row',      // thứ tự anh chị em từ trái sang phải: 'row' = đúng thứ tự dòng trong Excel,
+                            // 'birth' = theo năm sinh (người không có năm sinh bị xếp cuối)
+  maxNameLines: 2,          // tên dài tối đa mấy dòng trên thẻ
+  pollMs: 1500,             // bao lâu kiểm tra file Excel một lần (mili giây)
+
+  // Tên cột trong Excel. Mỗi cột liệt kê các tên được chấp nhận.
+  // Viết thường, KHÔNG dấu, bỏ ký tự đặc biệt (ví dụ "Mã vợ/chồng" -> "ma vo chong").
+  columns: {
+    id:     ['ma thanh vien', 'ma tv', 'id'],
+    name:   ['ho va ten', 'ho ten', 'ten'],
+    birth:  ['nam sinh'],
+    death:  ['nam mat'],
+    father: ['ma bo', 'ma cha'],
+    mother: ['ma me'],
+    spouse: ['ma vo chong', 'ma vo', 'ma chong', 'ma vc'],
+    // Các cột bổ sung (không bắt buộc, có hay không đều được):
+    gender:    ['gioi tinh', 'gioi', 'phai'],
+    birthDate: ['ngay sinh', 'ngay thang nam sinh'],   // ngày sinh đầy đủ, ví dụ 25/12/1950
+    deathDate: ['ngay mat', 'ngay thang nam mat']
+  }
+};
+
+/* =====================================================================
+   2. ĐỌC FILE EXCEL -> danh sách người
+   ===================================================================== */
+
+// Bỏ dấu, viết thường để so tên cột. "Mã vợ/chồng" -> "ma vo chong"
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// Lấy năm từ ô Excel (số 1950, ngày 12/03/1950, hoặc chữ "1950")
+function toYear(v) {
+  if (v === '' || v == null) return '';
+  if (v instanceof Date) return String(v.getFullYear());
+  if (typeof v === 'number') {
+    if (v >= 1000 && v <= 3000) return String(Math.round(v));
+    return String(new Date(Math.round((v - 25569) * 864e5)).getUTCFullYear());  // số ngày kiểu Excel
+  }
+  const m = String(v).match(/\d{4}/);
+  return m ? m[0] : String(v).trim();
+}
+
+// Đọc ngày đầy đủ từ ô Excel -> {y, m, d}; trả về null nếu ô trống hoặc chỉ có năm
+function parseDate(v) {
+  if (v instanceof Date) return { y: v.getFullYear(), m: v.getMonth() + 1, d: v.getDate() };
+  if (typeof v === 'number' && v > 3000) {          // ô kiểu ngày của Excel (số ngày từ 1900)
+    const x = new Date(Math.round((v - 25569) * 864e5));
+    return { y: x.getUTCFullYear(), m: x.getUTCMonth() + 1, d: x.getUTCDate() };
+  }
+  const s = String(v ?? '').trim();
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);   // 25/12/1950 (ngày/tháng/năm)
+  if (m) return { y: +m[3], m: +m[2], d: +m[1] };
+  m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);       // 1950-12-25
+  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null;
+}
+const fmtDate = x => x ? `${String(x.d).padStart(2, '0')}/${String(x.m).padStart(2, '0')}/${x.y}` : '';
+
+// "nam" -> "Nam", "nữ" -> "Nữ", giá trị khác giữ nguyên
+function toGender(v) {
+  const k = norm(v);
+  return k === 'nam' ? 'Nam' : k === 'nu' ? 'Nữ' : String(v ?? '').trim();
+}
+
+// Tuổi: chính xác nếu có đủ ngày tháng, nếu không thì tính theo năm. Trả về {age, exact} hoặc null.
+function ageOf(p) {
+  const by = +p.birth;
+  if (!by) return null;
+  const now = new Date();
+  const end = p.death ? (p.deathDate || { y: +p.death }) : { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+  if (!end.y) return null;
+  const b = p.birthDate;
+  let age = end.y - by;
+  const exact = !!(b && end.m);
+  if (exact && (end.m < b.m || (end.m === b.m && end.d < b.d))) age--;   // chưa tới sinh nhật năm nay
+  return { age, exact };
+}
+
+// Đọc sheet đầu tiên, trả về [{id, name, birth, death, fatherId, motherId, spouseIds, order}]
+function readSheet(input, type = 'array') {     // type: 'array' = file Excel, 'string' = chữ CSV từ Google Sheets
+  const book = XLSX.read(input, { type, raw: type === 'string' });   // raw: giữ nguyên chữ, không tự đổi "001" thành 1
+  const rows = XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, raw: true, defval: '' });
+
+  const headerRow = rows.findIndex(r => r.some(c => CONFIG.columns.id.includes(norm(c))));
+  if (headerRow < 0) throw new Error('Không tìm thấy dòng tiêu đề có cột “Mã thành viên”.');
+
+  const header = rows[headerRow].map(norm);
+  const col = {};                                   // vị trí từng cột, ví dụ col.name = 1
+  for (const key in CONFIG.columns) col[key] = header.findIndex(h => CONFIG.columns[key].includes(h));
+
+  const labels = { id: 'Mã thành viên', name: 'Họ và tên', father: 'Mã bố', mother: 'Mã mẹ' };
+  const missing = Object.keys(labels).filter(k => col[k] < 0).map(k => labels[k]);
+  if (missing.length) throw new Error('Thiếu cột: ' + missing.join(', '));
+
+  const text = (row, key) => col[key] < 0 ? '' : String(row[col[key]] ?? '').trim();
+  const people = [];
+  for (const row of rows.slice(headerRow + 1)) {
+    const id = text(row, 'id');
+    if (!id) continue;                              // bỏ qua dòng trống
+    // Ngày đầy đủ: lấy từ cột "Ngày sinh/Ngày mất", hoặc từ cột "Năm sinh/Năm mất" nếu ô đó ghi cả ngày
+    const birthDate = parseDate(col.birthDate < 0 ? '' : row[col.birthDate]) || parseDate(col.birth < 0 ? '' : row[col.birth]);
+    const deathDate = parseDate(col.deathDate < 0 ? '' : row[col.deathDate]) || parseDate(col.death < 0 ? '' : row[col.death]);
+    people.push({
+      id,
+      name: text(row, 'name') || id,
+      gender: toGender(text(row, 'gender')),
+      birth: (col.birth < 0 ? '' : toYear(row[col.birth])) || (birthDate ? String(birthDate.y) : ''),
+      death: (col.death < 0 ? '' : toYear(row[col.death])) || (deathDate ? String(deathDate.y) : ''),
+      birthDate, deathDate,
+      fatherId: text(row, 'father'),
+      motherId: text(row, 'mother'),
+      spouseIds: text(row, 'spouse').split(/[,;\s]+/).filter(Boolean),  // có thể ghi nhiều mã
+      order: people.length                          // thứ tự dòng trong Excel (dùng để xếp anh chị em)
+    });
+  }
+  return people;
+}
+
+/* =====================================================================
+   3. XỬ LÝ QUAN HỆ VÀ XẾP VỊ TRÍ (không đụng tới giao diện)
+   ===================================================================== */
+const C = CONFIG.card;
+
+// Bước 1: nối cha, mẹ, con, vợ/chồng với nhau
+function linkPeople(list, warns) {
+  const byId = new Map();
+  for (const r of list) {
+    if (byId.has(r.id)) warns.push('Trùng mã: ' + r.id);
+    else byId.set(r.id, { ...r, father: null, mother: null, kids: [], spouses: new Set(), gen: 0 });
+  }
+  const find = (p, ref, what) => {
+    if (!ref) return null;
+    const q = byId.get(ref);
+    if (!q) { warns.push(`${p.name} (${p.id}): không tìm thấy mã ${what} ${ref}`); return null; }
+    if (q === p) { warns.push(`${p.id} tự nhận chính mình là ${what}`); return null; }
+    return q;
+  };
+  byId.forEach(p => {
+    p.father = find(p, p.fatherId, 'bố');
+    p.mother = find(p, p.motherId, 'mẹ');
+    [p.father, p.mother].forEach(q => q && q.kids.push(p));
+    if (p.father && p.mother) { p.father.spouses.add(p.mother); p.mother.spouses.add(p.father); }  // cùng có con = vợ chồng
+    p.spouseIds.forEach(ref => {
+      const q = find(p, ref, 'vợ/chồng');
+      if (q) { p.spouses.add(q); q.spouses.add(p); }
+    });
+  });
+  return byId;
+}
+
+// Bước 2: tính đời. Người không có cha mẹ = đời 1, con = đời cha mẹ + 1, vợ chồng cùng đời.
+function assignGenerations(all, warns) {
+  let changed = true, rounds = 0;
+  while (changed && rounds++ < all.length + 5) {
+    changed = false;
+    for (const p of all) {
+      let g = p.gen;
+      for (const q of [p.father, p.mother]) if (q) g = Math.max(g, q.gen + 1);
+      for (const s of p.spouses) g = Math.max(g, s.gen);
+      if (g > p.gen) { p.gen = g; changed = true; }
+    }
+  }
+  if (changed) warns.push('Quan hệ cha/mẹ - con bị vòng lặp (A là tổ tiên của chính A). Hãy kiểm tra Mã bố/Mã mẹ.');
+}
+
+// Bước 3: gom vợ chồng thành một "khối" (unit) để xếp cạnh nhau
+function makeUnits(all) {
+  const units = [], seen = new Set();
+  for (const start of all) {
+    if (seen.has(start)) continue;
+    const group = [], stack = [start];
+    seen.add(start);
+    while (stack.length) {                       // gom tất cả người nối với nhau bằng quan hệ vợ chồng
+      const x = stack.pop();
+      group.push(x);
+      x.spouses.forEach(s => { if (!seen.has(s)) { seen.add(s); stack.push(s); } });
+    }
+    const people = orderSpouses(group);
+    const unit = {
+      people, children: [], candidates: [], parent: null,
+      gen: Math.max(...people.map(x => x.gen)),
+      width: people.length * C.w + (people.length - 1) * C.gapSpouse,
+      first: Math.min(...people.map(x => x.order)),
+      x: 0
+    };
+    people.forEach(x => { x.gen = unit.gen; x.unit = unit; });
+    units.push(unit);
+  }
+  return units;
+}
+
+// Thứ tự trong một khối: người có cha mẹ trong sheet đứng trước, sau đó theo thứ tự dòng.
+// Nếu một người có nhiều vợ/chồng thì đặt người đó ở giữa.
+function orderSpouses(group) {
+  group.sort((a, b) => (!!(b.father || b.mother)) - (!!(a.father || a.mother)) || a.order - b.order);
+  if (group.length <= 2) return group;
+  const hub = group.reduce((best, x) => x.spouses.size > best.spouses.size ? x : best, group[0]);
+  const mates = [...hub.spouses].sort((a, b) => a.order - b.order);
+  return [mates[0], hub, ...mates.slice(1), ...group.filter(x => x !== hub && !hub.spouses.has(x))];
+}
+
+// Bước 4: xếp vị trí kiểu cây - mỗi nhánh gia đình có vùng riêng, cha mẹ nằm giữa các con
+function layoutUnits(units) {
+  // 4a. Mỗi khối gắn vào khối cha mẹ của người đầu tiên có cha mẹ
+  for (const u of units) {
+    const kid = u.people.filter(x => x.father || x.mother).sort((a, b) => a.order - b.order)[0];
+    if (!kid) continue;
+    const pu = (kid.father || kid.mother).unit;
+    if (pu === u) continue;
+    const at = q => q ? pu.people.indexOf(q) : 0;
+    u.parent = pu;
+    u.sortKey = [at(kid.father) + at(kid.mother), kid.rank];    // nhóm theo cặp bố mẹ, rồi theo thứ tự anh chị em
+    pu.candidates.push(u);
+  }
+  units.forEach(u => u.candidates.sort((a, b) => a.sortKey[0] - b.sortKey[0] || a.sortKey[1] - b.sortKey[1]));
+
+  // 4b. Dựng cây (có chặn vòng lặp)
+  const visited = new Set();
+  const grow = u => {
+    visited.add(u);
+    u.children = u.candidates.filter(k => !visited.has(k));
+    u.children.forEach(k => visited.add(k));
+    u.children.forEach(grow);
+  };
+  const byOrder = [...units].sort((a, b) => a.first - b.first);
+  const roots = byOrder.filter(u => !u.parent);
+  roots.forEach(u => { if (!visited.has(u)) grow(u); });
+  byOrder.forEach(u => { if (!visited.has(u)) { roots.push(u); grow(u); } });
+
+  // 4c. Đo bề rộng mỗi nhánh = max(khối cha mẹ, tổng các nhánh con)
+  const measure = u => {
+    u.children.forEach(measure);
+    u.kidsWidth = u.children.reduce((s, k) => s + k.span, 0) + C.gapUnit * Math.max(0, u.children.length - 1);
+    u.span = Math.max(u.width, u.kidsWidth);
+  };
+
+  // 4d. Đặt vị trí: các con trải đều trong nhánh, cha mẹ nằm giữa con đầu và con cuối
+  const place = (u, left) => {
+    let x = left + (u.span - u.kidsWidth) / 2;
+    u.children.forEach(k => { place(k, x); x += k.span + C.gapUnit; });
+    if (u.children.length) {
+      const first = u.children[0], last = u.children[u.children.length - 1];
+      const mid = (first.x + first.width / 2 + last.x + last.width / 2) / 2;
+      u.x = Math.min(Math.max(mid - u.width / 2, left), left + u.span - u.width);
+    } else u.x = left + (u.span - u.width) / 2;
+  };
+
+  let cursor = C.marginX;
+  roots.forEach(r => { measure(r); place(r, cursor); cursor += r.span + C.gapUnit * 2; });
+}
+
+// Bước 5: gom các gia đình (cặp bố mẹ + con) và các cặp vợ chồng chưa có con, để vẽ đường nối
+function makeFamilies(all) {
+  const map = new Map();
+  for (const p of all) {
+    let f = p.father, m = p.mother;
+    if (!f && !m) continue;
+    // Chỉ ghi một phía mà người đó có đúng 1 vợ/chồng -> coi vợ/chồng là cha/mẹ còn lại
+    if (!f && m.spouses.size === 1) f = [...m.spouses][0];
+    if (!m && f.spouses.size === 1) m = [...f.spouses][0];
+    const key = (f ? f.id : '') + '|' + (m ? m.id : '');
+    if (!map.has(key)) map.set(key, { parents: [f, m].filter(Boolean), kids: [] });
+    map.get(key).kids.push(p);
+  }
+  const childless = [];
+  all.forEach(a => a.spouses.forEach(b => {
+    if (a.order < b.order && !map.has(a.id + '|' + b.id) && !map.has(b.id + '|' + a.id)) childless.push([a, b]);
+  }));
+  return { families: [...map.values()], childless };
+}
+
+// Hàm chính: từ danh sách dòng Excel -> mô hình để vẽ
+function buildModel(list) {
+  const warns = [];
+  const byId = linkPeople(list, warns);
+  const all = [...byId.values()];
+  assignGenerations(all, warns);
+  // rank = thứ tự anh chị em: theo năm sinh (nếu bật) rồi tới thứ tự dòng
+  const birthKey = p => CONFIG.siblingOrder === 'birth' && +p.birth ? +p.birth : 1e9;
+  [...all].sort((a, b) => birthKey(a) - birthKey(b) || a.order - b.order).forEach((p, i) => { p.rank = i; });
+  const units = makeUnits(all);
+  layoutUnits(units);
+
+  for (const u of units) {                       // tọa độ từng người
+    u.people.forEach((p, i) => { p.cx = u.x + i * (C.w + C.gapSpouse) + C.w / 2; p.y = C.marginY + p.gen * C.rowGap; });
+  }
+  const maxGen = Math.max(0, ...all.map(p => p.gen));
+  return {
+    all, byId, warns, maxGen,
+    ...makeFamilies(all),
+    width: Math.max(...units.map(u => u.x + u.width)) + C.marginX,
+    height: C.marginY * 2 + maxGen * C.rowGap + C.h
+  };
+}
+
+/* =====================================================================
+   4. VẼ SƠ ĐỒ (tạo chuỗi SVG)
+   ===================================================================== */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const genColor = g => `hsl(${CONFIG.hues[g % CONFIG.hues.length]} 48% 40%)`;
+
+// Chia tên thành tối đa maxNameLines dòng vừa bề rộng thẻ (đo bằng canvas)
+const ruler = document.createElement('canvas').getContext('2d');
+function wrapName(name, maxWidth) {
+  ruler.font = '600 13px "Be Vietnam Pro",system-ui,"Segoe UI",sans-serif';
+  const lines = [];
+  let cur = '';
+  for (const word of String(name).split(/\s+/)) {
+    const next = cur ? cur + ' ' + word : word;
+    if (!cur || ruler.measureText(next).width <= maxWidth) cur = next;
+    else { lines.push(cur); cur = word; }
+  }
+  lines.push(cur);
+  if (lines.length <= CONFIG.maxNameLines) return lines;
+  let last = lines.slice(CONFIG.maxNameLines - 1).join(' ');       // dòng cuối quá dài -> cắt và thêm "…"
+  while (last.length > 1 && ruler.measureText(last + '…').width > maxWidth) last = last.slice(0, -1);
+  return [...lines.slice(0, CONFIG.maxNameLines - 1), last + '…'];
+}
+
+// Dải nền xen kẽ cho từng đời
+const drawBands = m => Array.from({ length: m.maxGen + 1 }, (_, g) =>
+  g % 2 ? '' : `<rect x="0" y="${C.marginY + g * C.rowGap - 26}" width="${m.width}" height="${C.h + 52}" fill="var(--band)"/>`).join('');
+
+// Đường nối: vợ chồng (ngang) + cha mẹ xuống con (thả dọc, thanh ngang, rẽ dọc xuống từng con)
+function drawEdges(m) {
+  let s = '';
+  m.families.forEach((f, i) => {
+    const [a, b] = f.parents, y = a.y;
+    const ax = f.parents.reduce((t, p) => t + p.cx, 0) / f.parents.length;   // điểm giữa cha mẹ
+    const startY = b ? y + C.h / 2 : y + C.h;
+    const busY = y + C.h + (C.rowGap - C.h) / 2 + 4;                         // thanh ngang nối các con
+    const xs = [ax, ...f.kids.map(k => k.cx)];
+    let d = b ? `M${a.cx} ${y + C.h / 2}H${b.cx}` : '';
+    d += `M${ax} ${startY}V${busY}M${Math.min(...xs)} ${busY}H${Math.max(...xs)}`;
+    f.kids.forEach(k => { d += `M${k.cx} ${busY}V${k.y}`; });
+    s += `<path class="edge" data-family="${i}" d="${d}"/>`;
+  });
+  m.childless.forEach(([a, b], i) => {
+    s += `<path class="edge" data-pair="${i}" d="M${a.cx} ${a.y + C.h / 2}H${b.cx}"/>`;
+  });
+  return s;
+}
+
+// Thẻ từng người. Muốn đổi nội dung hiển thị trên thẻ thì sửa ở đây.
+function drawCards(m) {
+  return m.all.map(p => {
+    const color = genColor(p.gen);
+    const lines = wrapName(p.name, C.w - 36);   // chừa lề trái 16 + lề phải 20
+    const years = p.birth || p.death ? `${p.birth || '?'} – ${p.death || (p.birth ? 'nay' : '?')}` : '';
+    const yearY = 22 + (lines.length - 1) * 16 + 19;           // dòng năm nằm dưới phần tên
+    const nameSvg = lines.map((l, i) => `<tspan x="16" dy="${i ? 16 : 0}">${esc(l)}</tspan>`).join('');
+    return `<g class="card" clip-path="url(#cardClip)" data-id="${esc(p.id)}" transform="translate(${p.cx - C.w / 2} ${p.y})" tabindex="0">
+      <title>${esc(p.name)} (${esc(p.id)})</title>
+      <rect class="box" width="${C.w}" height="${C.h}" rx="8" stroke="${color}"/>
+      <rect width="6" height="${C.h}" rx="3" fill="${color}"/>
+      <text class="name" x="16" y="22">${nameSvg}</text>
+      <text class="year" x="16" y="${yearY}">${esc(years)}</text>
+      <text class="code" x="16" y="${yearY + 16}">${esc(p.id)}</text>
+    </g>`;
+  }).join('');
+}
+
+// Nhãn "Đời 1, Đời 2..." bên trái (id="gen-labels" để luôn dính mép trái khi cuộn ngang)
+const drawLabels = m => '<g id="gen-labels">' + Array.from({ length: m.maxGen + 1 }, (_, g) =>
+  `<text class="gen-label" x="12" y="${C.marginY + g * C.rowGap - 10}">${CONFIG.generationLabel} ${g + 1}</text>`).join('') + '</g>';
+
+/* =====================================================================
+   5. TƯƠNG TÁC: vẽ, chọn người, tìm kiếm, phóng to
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const state = { model: null, scale: 1, selected: null, handle: null, lastModified: 0, timer: null };
+
+function render() {
+  const m = state.model;
+  if (!m) return;
+  $('empty')?.remove();
+  stage.querySelector('svg')?.remove();
+  stage.insertAdjacentHTML('beforeend',
+    `<svg id="svg" width="${m.width * state.scale}" height="${m.height * state.scale}" viewBox="0 0 ${m.width} ${m.height}" xmlns="http://www.w3.org/2000/svg">
+      <defs><clipPath id="cardClip"><rect width="${C.w}" height="${C.h}" rx="8"/></clipPath></defs>
+      ${drawBands(m)}<g>${drawEdges(m)}</g>${drawCards(m)}${drawLabels(m)}</svg>`);
+  syncLabels(); applySelection(); applySearch();
+}
+// Chờ font Be Vietnam Pro tải xong rồi vẽ lại, để đo độ rộng tên cho đúng (đo sớm sẽ bị sai và tên tràn ô)
+if (document.fonts) {
+  Promise.all([document.fonts.load('600 13px "Be Vietnam Pro"'), document.fonts.load('400 12px "Be Vietnam Pro"')])
+    .catch(() => {}).then(() => state.model && render());
+}
+
+function showStatus(extra) {
+  const m = state.model;
+  if (m) $('status').textContent = `${m.all.length} thành viên, ${m.maxGen + 1} đời` + (extra ? ` · ${extra}` : '');
+}
+function syncLabels() {
+  $('gen-labels')?.setAttribute('transform', `translate(${stage.scrollLeft / state.scale} 0)`);
+}
+stage.addEventListener('scroll', syncLabels);
+
+// Người có quan hệ trực hệ với p: tổ tiên, con cháu, vợ/chồng
+function relatives(p) {
+  const set = new Set([p]);
+  const up = q => { if (q && !set.has(q)) { set.add(q); up(q.father); up(q.mother); } };
+  const down = q => q.kids.forEach(k => { if (!set.has(k)) { set.add(k); down(k); } });
+  up(p.father); up(p.mother); down(p);
+  p.spouses.forEach(s => set.add(s));
+  return set;
+}
+
+// Làm mờ những người không liên quan tới người đang chọn
+function applySelection() {
+  const m = state.model, svg = $('svg');
+  if (!svg || !m) return;
+  const p = m.byId.get(state.selected);
+  const set = p ? relatives(p) : null;
+  svg.querySelectorAll('.card').forEach(c => {
+    const q = m.byId.get(c.dataset.id);
+    c.classList.toggle('dim', !!set && !set.has(q));
+    c.classList.toggle('sel', q === p);
+  });
+  svg.querySelectorAll('.edge').forEach(e => {
+    let show = true;
+    if (set && e.dataset.family) { const f = m.families[+e.dataset.family]; show = f.parents.every(x => set.has(x)) && f.kids.some(k => set.has(k)); }
+    if (set && e.dataset.pair)   { show = m.childless[+e.dataset.pair].every(x => set.has(x)); }
+    e.classList.toggle('dim', !show);
+  });
+  if (p) $('status').textContent = `${p.name}: ${set.size - 1} người có quan hệ trực hệ hoặc vợ/chồng. Bấm vào chỗ trống để bỏ chọn.`;
+  else showStatus();
+  showInfo(p);
+}
+
+// Khung thông tin chi tiết. Muốn thêm/bớt dòng thì sửa mảng rows bên dưới.
+function showInfo(p) {
+  $('info').hidden = !p;
+  if (!p) return;
+  const a = ageOf(p), dead = !!p.death;
+  const list = people => [...people].map(q => q.name).join(', ');
+  $('infoName').textContent = p.name;
+  $('infoAge').textContent = a
+    ? `${dead ? 'Thọ ' : ''}${a.exact ? '' : 'khoảng '}${a.age} tuổi`
+    : 'Chưa rõ tuổi';
+  const rows = [
+    ['Giới tính', p.gender],
+    ['Ngày sinh', fmtDate(p.birthDate) || (p.birth ? 'Năm ' + p.birth : '')],
+    dead ? ['Ngày mất', fmtDate(p.deathDate) || 'Năm ' + p.death] : null,   // chỉ hiện khi có năm mất
+    ['Bố', p.father ? p.father.name : ''],
+    ['Mẹ', p.mother ? p.mother.name : ''],
+    ['Vợ/chồng', list(p.spouses)],
+    ['Con', p.kids.length ? `${p.kids.length}: ${list(p.kids)}` : '']
+  ].filter(Boolean);
+  $('infoRows').innerHTML = rows.map(([k, v]) =>
+    `<dt>${k}</dt><dd class="${v ? '' : 'none'}">${v ? esc(v) : 'Chưa có'}</dd>`).join('');
+}
+$('infoClose').onclick = () => { state.selected = null; applySelection(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.selected) $('infoClose').click(); });
+stage.addEventListener('click', e => {
+  const card = e.target.closest('.card');
+  state.selected = card && card.dataset.id !== state.selected ? card.dataset.id : null;
+  applySelection();
+});
+stage.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.classList.contains('card')) e.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+});
+
+// Tìm theo tên hoặc mã, cuộn tới người đầu tiên tìm thấy
+function applySearch() {
+  const m = state.model, svg = $('svg');
+  if (!svg || !m) return;
+  const q = norm($('search').value);
+  svg.querySelectorAll('.card').forEach(c => {
+    const p = m.byId.get(c.dataset.id);
+    c.classList.toggle('hit', !!q && (norm(p.name).includes(q) || norm(p.id).includes(q)));
+  });
+  const hit = svg.querySelector('.hit');
+  if (hit) {
+    const p = m.byId.get(hit.dataset.id);
+    stage.scrollTo({ left: p.cx * state.scale - stage.clientWidth / 2, top: p.y * state.scale - stage.clientHeight / 2, behavior: 'smooth' });
+  }
+}
+$('search').addEventListener('input', applySearch);
+
+function zoom(factor) { state.scale = Math.min(3, Math.max(0.25, state.scale * factor)); render(); }
+$('btnZoomIn').onclick = () => zoom(1.2);
+$('btnZoomOut').onclick = () => zoom(1 / 1.2);
+$('btnFit').onclick = () => {
+  if (!state.model) return;
+  state.scale = Math.min(1, (stage.clientWidth - 4) / state.model.width);
+  render(); stage.scrollTo(0, 0);
+};
+
+/* =====================================================================
+   6. NẠP FILE VÀ TỰ CẬP NHẬT KHI LƯU EXCEL
+   ===================================================================== */
+
+// Đọc dữ liệu từ bộ nhớ đệm file -> dựng mô hình -> vẽ
+function loadBuffer(buffer, note, type = 'array') {
+  const warn = $('warn');
+  try {
+    const model = buildModel(readSheet(buffer, type));
+    state.model = model;
+    if (!model.byId.has(state.selected)) state.selected = null;
+    warn.style.display = model.warns.length ? 'block' : 'none';
+    warn.textContent = 'Cần kiểm tra: ' + model.warns.join(' • ');
+    render(); showStatus(note);
+  } catch (err) {
+    warn.style.display = 'block';
+    warn.textContent = 'Không đọc được file: ' + err.message;
+  }
+}
+const loadFile = async (file, note) => loadBuffer(await file.arrayBuffer(), note);
+const clock = () => new Date().toLocaleTimeString('vi-VN');
+
+// Theo dõi file: cứ mỗi CONFIG.pollMs kiểm tra giờ sửa file, đổi thì đọc lại
+async function watchFile(handle) {
+  state.handle = handle;
+  clearInterval(state.timer);
+  rememberHandle(handle);
+  const first = await handle.getFile();
+  state.lastModified = first.lastModified;
+  await loadFile(first, 'đang theo dõi ' + handle.name);
+  $('btnRemember').hidden = true;
+  $('btnReload').hidden = false;
+  $('btnReload').onclick = async () => { const f = await handle.getFile(); state.lastModified = f.lastModified; loadFile(f, 'đã tải lại ' + clock()); };
+  state.timer = setInterval(async () => {
+    try {
+      const f = await handle.getFile();
+      if (f.lastModified !== state.lastModified) { state.lastModified = f.lastModified; loadFile(f, 'cập nhật lúc ' + clock()); }
+    } catch (e) { /* file đang bị khóa hoặc bị xóa, thử lại ở lần sau */ }
+  }, CONFIG.pollMs);
+}
+
+// Nút "Mở file Excel": Chrome/Edge dùng được chế độ theo dõi, trình duyệt khác chỉ đọc một lần
+$('btnOpen').onclick = async () => {
+  if (!window.showOpenFilePicker) return $('fileInput').click();
+  try { const [h] = await showOpenFilePicker({ types: [{ description: 'Bảng tính', accept: { 'application/*': ['.xlsx', '.xls'], 'text/csv': ['.csv'] } }] }); await watchFile(h); }
+  catch (e) { /* người dùng bấm hủy */ }
+};
+$('fileInput').onchange = e => {
+  const f = e.target.files[0];
+  if (f) { loadFile(f, 'đã nạp ' + f.name); $('btnReload').hidden = false; $('btnReload').onclick = () => $('fileInput').click(); }
+  e.target.value = '';
+};
+
+// Kéo thả file vào trang
+['dragenter', 'dragover'].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); stage.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); stage.classList.remove('drag'); }));
+stage.addEventListener('drop', async e => {
+  const item = e.dataTransfer.items[0];
+  if (item?.getAsFileSystemHandle) {
+    try { const h = await item.getAsFileSystemHandle(); if (h?.kind === 'file') return watchFile(h); } catch (_) {}
+  }
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f, 'đã nạp ' + f.name);
+});
+
+// --- Chế độ trực tuyến: đọc dữ liệu từ link Google Sheets (CSV) ---
+// Có thể thử nhanh bằng cách thêm vào địa chỉ trang:  ?sheet=<link csv>
+const SHEET_URL = new URLSearchParams(location.search).get('sheet') || CONFIG.sheetUrl;
+
+async function fetchSheet(note) {
+  try {
+    const res = await fetch(SHEET_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('máy chủ trả về lỗi ' + res.status);
+    const text = await res.text();
+    if (/^\s*</.test(text)) throw new Error('link trả về trang web thay vì dữ liệu CSV, hãy kiểm tra lại bước “Xuất bản lên web”');
+    if (text === state.lastText) return;            // dữ liệu không đổi thì không vẽ lại
+    state.lastText = text;
+    loadBuffer(text, note || 'Google Sheets, ' + clock(), 'string');
+  } catch (err) {
+    const warn = $('warn');
+    warn.style.display = 'block';
+    warn.textContent = 'Không tải được dữ liệu từ Google Sheets: ' + err.message;
+  }
+}
+if (SHEET_URL) {
+  if (!CONFIG.allowLocalFile) { $('btnOpen').hidden = true; $('btnRemember').hidden = true; }
+  $('btnReload').hidden = false;
+  $('btnReload').onclick = () => { state.lastText = null; fetchSheet('đã tải lại ' + clock()); };
+  $('empty').querySelector('h2').textContent = 'Đang tải dữ liệu…';
+  $('empty').querySelectorAll('p').forEach(x => x.remove());
+  fetchSheet();
+  setInterval(fetchSheet, CONFIG.sheetRefreshSec * 1000);
+}
+
+// Nhớ file lần trước (Chrome/Edge) để lần sau chỉ cần bấm "Mở lại"
+const openDb = () => new Promise((ok, fail) => {
+  const r = indexedDB.open('giapha', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('h');
+  r.onsuccess = () => ok(r.result);
+  r.onerror = fail;
+});
+async function rememberHandle(h) { try { (await openDb()).transaction('h', 'readwrite').objectStore('h').put(h, 'last'); } catch (e) {} }
+(async () => {
+  if (!window.showOpenFilePicker || SHEET_URL) return;
+  try {
+    const req = (await openDb()).transaction('h').objectStore('h').get('last');
+    req.onsuccess = async () => {
+      const h = req.result;
+      if (!h) return;
+      const b = $('btnRemember');
+      b.textContent = 'Mở lại ' + h.name; b.hidden = false;
+      b.onclick = async () => { if (await h.requestPermission({ mode: 'read' }) === 'granted') watchFile(h); };
+      if (await h.queryPermission({ mode: 'read' }) === 'granted') watchFile(h);
+    };
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
