@@ -38,7 +38,7 @@ html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--ink);font:14px/1.45 "Be Vietnam Pro",system-ui,"Segoe UI",sans-serif;display:flex;flex-direction:column}
 header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--border)}
 h1{font-size:17px;margin:0 8px 0 0}
-button,input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 11px}
+button,input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 11px}
 button{cursor:pointer}
 button.main{background:var(--accent);border-color:var(--accent);color:#fff}
 input[type=search]{width:190px}
@@ -81,7 +81,7 @@ svg{display:block}
   <h1>Gia phả</h1>
   <button class="main" id="btnOpen">Mở file Excel</button>
   <button id="btnRemember" hidden></button>
-  <button id="btnReload" hidden>Tải lại</button>
+  <label>Hiển thị <select id="viewSelect"></select></label>
   <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
   <input type="search" id="search" placeholder="Tìm tên hoặc mã" aria-label="Tìm thành viên">
   <button id="btnZoomOut" aria-label="Thu nhỏ">−</button>
@@ -126,12 +126,18 @@ const CONFIG = {
   // Màu theo từng đời (số = góc màu trên vòng màu 0-360). Hết danh sách thì quay lại từ đầu.
   hues: [190, 150, 95, 45, 20, 340, 290, 250],
 
-  // --- Chạy trực tuyến bằng Google Sheets ---
-  // Dán link "Xuất bản lên web" dạng CSV của Google Sheets vào đây. Để trống nếu dùng file Excel trên máy.
-  // Ví dụ: 'https://docs.google.com/spreadsheets/d/e/2PACX-xxxx/pub?output=csv'
-  sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?output=csv',
-  sheetRefreshSec: 15,      // bao lâu tự tải lại dữ liệu từ Google Sheets (giây)
-  allowLocalFile: false,    // true = vẫn hiện nút "Mở file Excel" khi đã có sheetUrl (dành cho người quản lý)
+  // --- Các cây gia phả. Mỗi cây là MỘT tab riêng trong Excel / Google Sheets, dữ liệu độc lập nhau ---
+  //   label    : tên hiện trong ô "Hiển thị"
+  //   tabNames : tên tab trong file Excel (viết thường, không dấu) để trang tự nhận ra tab. Không khớp thì lấy theo thứ tự tab.
+  //   url      : link "Xuất bản lên web" dạng CSV của tab đó trên Google Sheets. Để trống nếu dùng file Excel trên máy.
+  //              Ví dụ: 'https://docs.google.com/spreadsheets/d/e/2PACX-xxxx/pub?gid=0&single=true&output=csv'
+  // Muốn thêm cây thứ ba, thêm một dòng nữa vào danh sách này.
+  sheets: [
+    { id: 'noi',   label: 'Bên nội',   tabNames: ['noi', 'ben noi'],     url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=1978203275&single=true&output=csv' },
+    { id: 'ngoai', label: 'Bên ngoại', tabNames: ['ngoai', 'ben ngoai'], url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=749973340&single=true&output=csv' }
+  ],
+  sheetRefreshSec: 60,      // bao lâu tự tải lại dữ liệu từ Google Sheets (giây)
+  allowLocalFile: false,    // true = vẫn hiện nút "Mở file Excel" khi đã có link Google Sheets (dành cho người quản lý)
 
   generationLabel: 'Đời',   // chữ ghi bên trái mỗi hàng: "Đời 1", "Đời 2"...
   siblingOrder: 'row',      // thứ tự anh chị em từ trái sang phải: 'row' = đúng thứ tự dòng trong Excel,
@@ -211,10 +217,9 @@ function ageOf(p) {
   return { age, exact };
 }
 
-// Đọc sheet đầu tiên, trả về [{id, name, birth, death, fatherId, motherId, spouseIds, order}]
-function readSheet(input, type = 'array') {     // type: 'array' = file Excel, 'string' = chữ CSV từ Google Sheets
-  const book = XLSX.read(input, { type, raw: type === 'string' });   // raw: giữ nguyên chữ, không tự đổi "001" thành 1
-  const rows = XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, raw: true, defval: '' });
+// Đọc MỘT tab thành danh sách người: [{id, name, birth, death, fatherId, motherId, spouseIds, order...}]
+function sheetToPeople(ws) {
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
 
   const headerRow = rows.findIndex(r => r.some(c => CONFIG.columns.id.includes(norm(c))));
   if (headerRow < 0) throw new Error('Không tìm thấy dòng tiêu đề có cột “Mã thành viên”.');
@@ -249,6 +254,24 @@ function readSheet(input, type = 'array') {     // type: 'array' = file Excel, '
     });
   }
   return people;
+}
+
+// Link Google Sheets: mỗi link là chữ CSV của một tab
+function readCsv(text) {
+  const book = XLSX.read(text, { type: 'string', raw: true });   // raw: giữ nguyên chữ, không tự đổi "001" thành 1
+  return sheetToPeople(book.Sheets[book.SheetNames[0]]);
+}
+
+// File Excel nhiều tab: mỗi tab là một cây. Trả về { noi: [...], ngoai: [...] }
+function readTabs(buffer) {
+  const book = XLSX.read(buffer, { type: 'array' });
+  const trees = {};
+  CONFIG.sheets.forEach((def, i) => {
+    const name = book.SheetNames.find(n => def.tabNames.includes(norm(n))) ?? book.SheetNames[i];
+    try { trees[def.id] = name ? sheetToPeople(book.Sheets[name]) : []; }
+    catch (err) { throw new Error(`tab “${name}”: ${err.message}`); }
+  });
+  return trees;
 }
 
 /* =====================================================================
@@ -406,6 +429,7 @@ function makeFamilies(all) {
 
 // Hàm chính: từ danh sách dòng Excel -> mô hình để vẽ
 function buildModel(list) {
+  if (!list.length) return { all: [], byId: new Map(), warns: [], maxGen: 0, families: [], childless: [], width: 0, height: 0 };
   const warns = [];
   const byId = linkPeople(list, warns);
   const all = [...byId.values()];
@@ -504,7 +528,7 @@ const drawLabels = m => '<g id="gen-labels">' + Array.from({ length: m.maxGen + 
    ===================================================================== */
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { model: null, scale: 1, selected: null, handle: null, lastModified: 0, timer: null };
+const state = { model: null, trees: {}, view: CONFIG.sheets[0].id, lastText: {}, scale: 1, selected: null, handle: null, lastModified: 0, timer: null };
 
 function render() {
   const m = state.model;
@@ -627,21 +651,33 @@ $('btnFit').onclick = () => {
    6. NẠP FILE VÀ TỰ CẬP NHẬT KHI LƯU EXCEL
    ===================================================================== */
 
-// Đọc dữ liệu từ bộ nhớ đệm file -> dựng mô hình -> vẽ
-function loadBuffer(buffer, note, type = 'array') {
-  const warn = $('warn');
-  try {
-    const model = buildModel(readSheet(buffer, type));
-    state.model = model;
-    if (!model.byId.has(state.selected)) state.selected = null;
-    warn.style.display = model.warns.length ? 'block' : 'none';
-    warn.textContent = 'Cần kiểm tra: ' + model.warns.join(' • ');
-    render(); showStatus(note);
-  } catch (err) {
-    warn.style.display = 'block';
-    warn.textContent = 'Không đọc được file: ' + err.message;
+// File Excel trên máy -> đọc các tab -> vẽ
+function loadBuffer(buffer, note) {
+  try { state.trees = readTabs(buffer); rebuild(note); }
+  catch (err) {
+    $('warn').style.display = 'block';
+    $('warn').textContent = 'Không đọc được file: ' + err.message;
   }
 }
+
+// Dựng lại sơ đồ của cây đang chọn (state.view) và vẽ
+function rebuild(note) {
+  const people = state.trees[state.view] || [];
+  const model = buildModel(people);
+  state.model = model;
+  if (!model.byId.has(state.selected)) state.selected = null;
+  const warn = $('warn');
+  const msgs = model.warns.length ? ['Cần kiểm tra: ' + model.warns.join(' • ')] : [];
+  if (!people.length) msgs.push('Chưa có dữ liệu cho “' + CONFIG.sheets.find(d => d.id === state.view).label + '”.');
+  warn.style.display = msgs.length ? 'block' : 'none';
+  warn.textContent = msgs.join(' ');
+  render(); showStatus(note);
+}
+
+// Ô chọn cây gia phả đang xem (Bên nội / Bên ngoại)
+const viewSelect = $('viewSelect');
+CONFIG.sheets.forEach(d => viewSelect.add(new Option(d.label, d.id)));
+viewSelect.onchange = () => { state.view = viewSelect.value; state.selected = null; rebuild(); stage.scrollTo(0, 0); };
 const loadFile = async (file, note) => loadBuffer(await file.arrayBuffer(), note);
 const clock = () => new Date().toLocaleTimeString('vi-VN');
 
@@ -654,8 +690,6 @@ async function watchFile(handle) {
   state.lastModified = first.lastModified;
   await loadFile(first, 'đang theo dõi ' + handle.name);
   $('btnRemember').hidden = true;
-  $('btnReload').hidden = false;
-  $('btnReload').onclick = async () => { const f = await handle.getFile(); state.lastModified = f.lastModified; loadFile(f, 'đã tải lại ' + clock()); };
   state.timer = setInterval(async () => {
     try {
       const f = await handle.getFile();
@@ -672,7 +706,7 @@ $('btnOpen').onclick = async () => {
 };
 $('fileInput').onchange = e => {
   const f = e.target.files[0];
-  if (f) { loadFile(f, 'đã nạp ' + f.name); $('btnReload').hidden = false; $('btnReload').onclick = () => $('fileInput').click(); }
+  if (f) { loadFile(f, 'đã nạp ' + f.name); }
   e.target.value = '';
 };
 
@@ -688,33 +722,39 @@ stage.addEventListener('drop', async e => {
   if (f) loadFile(f, 'đã nạp ' + f.name);
 });
 
-// --- Chế độ trực tuyến: đọc dữ liệu từ link Google Sheets (CSV) ---
-// Có thể thử nhanh bằng cách thêm vào địa chỉ trang:  ?sheet=<link csv>
-const SHEET_URL = new URLSearchParams(location.search).get('sheet') || CONFIG.sheetUrl;
+// --- Chế độ trực tuyến: mỗi cây đọc từ link Google Sheets (CSV) của tab riêng ---
+// Thử nhanh không cần sửa code: thêm vào địa chỉ trang  ?noi=<link csv>&ngoai=<link csv>  (theo id của từng cây)
+const params = new URLSearchParams(location.search);
+const SHEETS = CONFIG.sheets.map(d => ({ ...d, url: params.get(d.id) || d.url }));
+const ONLINE = SHEETS.some(d => d.url);
 
-async function fetchSheet(note) {
-  try {
-    const res = await fetch(SHEET_URL, { cache: 'no-store' });
-    if (!res.ok) throw new Error('máy chủ trả về lỗi ' + res.status);
-    const text = await res.text();
-    if (/^\s*</.test(text)) throw new Error('link trả về trang web thay vì dữ liệu CSV, hãy kiểm tra lại bước “Xuất bản lên web”');
-    if (text === state.lastText) return;            // dữ liệu không đổi thì không vẽ lại
-    state.lastText = text;
-    loadBuffer(text, note || 'Google Sheets, ' + clock(), 'string');
-  } catch (err) {
-    const warn = $('warn');
-    warn.style.display = 'block';
-    warn.textContent = 'Không tải được dữ liệu từ Google Sheets: ' + err.message;
+async function fetchSheets(note) {
+  let changed = false;
+  const errors = [];
+  for (const def of SHEETS.filter(d => d.url)) {
+    try {
+      const res = await fetch(def.url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('máy chủ trả về lỗi ' + res.status);
+      const text = await res.text();
+      if (/^\s*</.test(text)) throw new Error('link trả về trang web thay vì dữ liệu CSV, hãy kiểm tra lại bước “Xuất bản lên web”');
+      if (text === state.lastText[def.id]) continue;      // dữ liệu không đổi thì bỏ qua
+      state.trees[def.id] = readCsv(text);
+      state.lastText[def.id] = text;
+      changed = true;
+    } catch (err) { errors.push(`${def.label}: ${err.message}`); }
+  }
+  if (changed) rebuild(note || 'Google Sheets, ' + clock());
+  if (errors.length) {
+    $('warn').style.display = 'block';
+    $('warn').textContent = 'Không tải được dữ liệu từ Google Sheets — ' + errors.join(' • ');
   }
 }
-if (SHEET_URL) {
+if (ONLINE) {
   if (!CONFIG.allowLocalFile) { $('btnOpen').hidden = true; $('btnRemember').hidden = true; }
-  $('btnReload').hidden = false;
-  $('btnReload').onclick = () => { state.lastText = null; fetchSheet('đã tải lại ' + clock()); };
   $('empty').querySelector('h2').textContent = 'Đang tải dữ liệu…';
   $('empty').querySelectorAll('p').forEach(x => x.remove());
-  fetchSheet();
-  setInterval(fetchSheet, CONFIG.sheetRefreshSec * 1000);
+  fetchSheets();
+  setInterval(fetchSheets, CONFIG.sheetRefreshSec * 1000);
 }
 
 // Nhớ file lần trước (Chrome/Edge) để lần sau chỉ cần bấm "Mở lại"
@@ -726,7 +766,7 @@ const openDb = () => new Promise((ok, fail) => {
 });
 async function rememberHandle(h) { try { (await openDb()).transaction('h', 'readwrite').objectStore('h').put(h, 'last'); } catch (e) {} }
 (async () => {
-  if (!window.showOpenFilePicker || SHEET_URL) return;
+  if (!window.showOpenFilePicker || ONLINE) return;
   try {
     const req = (await openDb()).transaction('h').objectStore('h').get('last');
     req.onsuccess = async () => {
