@@ -132,8 +132,11 @@ const CONFIG = {
   //   url      : link "Xuất bản lên web" dạng CSV của tab đó trên Google Sheets. Để trống nếu dùng file Excel trên máy.
   //              Ví dụ: 'https://docs.google.com/spreadsheets/d/e/2PACX-xxxx/pub?gid=0&single=true&output=csv'
   // Muốn thêm cây thứ ba, thêm một dòng nữa vào danh sách này.
-  sheets: [
-    { id: 'noi',   label: 'Bên nội',   tabNames: ['noi', 'ben noi'],     url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=1978203275&single=true&output=csv' },
+  sheets: 
+  [
+    { id: 'noi-VA', label: 'Bên nội VA', tabNames: ['noi', 'ben noi'], url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=1103974956&single=true&output=csv' },
+    { id: 'ngoai-VA', label: 'Bên ngoại VA', tabNames: ['noi', 'ben noi'], url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=1153984419&single=true&output=csv' },
+    { id: 'noi', label: 'Bên nội', tabNames: ['noi', 'ben noi'], url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=1978203275&single=true&output=csv' },
     { id: 'ngoai', label: 'Bên ngoại', tabNames: ['ngoai', 'ben ngoai'], url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTpdeW4IUJJCLd1FQf0tp6Tk7QPcdKQeRlaOcJoLbx7eFPXdFi3TI3Vt-BI4rUKXCidHkQBTF--xxpL/pub?gid=749973340&single=true&output=csv' }
   ],
   sheetRefreshSec: 60,      // bao lâu tự tải lại dữ liệu từ Google Sheets (giây)
